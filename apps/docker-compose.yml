@@ -1,0 +1,35 @@
+version: '2.0'
+
+services:
+  eventalerts:
+    image: ${EVENTALERTS}
+    depends_on:
+      - mqtt
+
+  mqtt:
+    image: ${MQTT}
+
+  datastream:
+    image: ${DATASTREAM}
+    depends_on:
+      - mqtt
+    tty: true
+
+  nodered:
+    image: ${NODERED}
+    ports:
+      - "1880:1880"
+    depends_on:
+      - mqtt
+
+  adc:
+    image: ${ADC}
+    depends_on:
+      - mqtt
+    devices:
+      - "/dev/:/dev/"
+    privileged: true
+    volumes:
+      - /sys/class/gpio/:/sys/class/gpio/
+
+

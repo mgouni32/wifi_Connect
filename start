@@ -1,0 +1,71 @@
+#!/bin/bash -xe
+containers=$(find * -maxdepth 0 -type d)
+
+SERVICES=( "mqtt" "nodered" "eventalerts" "datastream" "adc" )
+URLS=( ${MQTT} ${NODERED} ${EVENTALERTS} ${DATASTREAM} ${ADC} )
+TARS=( "/data/apps_mqtt.tar" "/data/apps_nodered.tar" "/data/apps_eventalerts.tar" "/data/apps_datastream.tar" "/data/apps_adc.tar" )
+INDEX=( 0 1 2 3 4 )
+
+# SERVICES=( "mqtt" "nodered" "eventalerts" "datastream" )
+# URLS=( ${MQTT} ${NODERED} ${EVENTALERTS} ${DATASTREAM} )
+# TARS=( "/data/apps_mqtt.tar" "/data/apps_nodered.tar" "/data/apps_eventalerts.tar" "/data/apps_datastream.tar" )
+# INDEX=( 0 1 2 3 )
+
+keep_alive() {
+	if [[ $(docker-compose ps 2>&1 | tail -n+3 | grep -v Up | wc -l) -ne 0 ]]; then
+		echo "A container has exited. Restarting docker stack."
+		docker-compose down
+		docker-compose pull
+		docker-compose up &
+	fi
+}
+
+run_docker() {
+	# start docker containers
+	docker rm -v $(docker ps -a -q -f status=exited 2>/dev/null) &>/dev/null || :
+	docker rmi $(docker images -f "dangling=true" -q 2>/dev/null) &>/dev/null || :
+	docker-compose down || :
+	for i in "${INDEX[@]}"; do
+		IMAGE_SERVICE=${SERVICES[i]}
+		IMAGE_URL=${URLS[i]}
+		IMAGE_TAR=${TARS[i]}
+		PULL_RESULT="$(docker-compose pull ${IMAGE_SERVICE})"
+		if [[ "${PULL_RESULT}" != *"Image is up to date"* ]] ; then
+			docker save -o ${IMAGE_TAR} ${IMAGE_URL}
+		fi
+	done
+	
+	docker-compose up &
+}
+
+#Add Resin-Wifi-Connect capabilities
+export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/host/run/dbus/system_bus_socket
+sleep 1 # Delay needed to avoid DBUS introspection errors
+node /usr/src/app/src/app.js --clear=false 
+#End add Resin-Wifi-Connect capabilities
+
+cd /usr/local/bin
+
+wrapdocker echo
+
+# log in to aws
+aws configure set aws_access_key_id ${AWSKEY} 
+aws configure set aws_secret_access_key ${AWSSECRET} 
+aws configure set default.region us-west-2
+
+AWSLOGIN="$(aws ecr get-login)"
+eval "${AWSLOGIN}"
+
+#if [ -f "/data/apps_nodered.tar" ] && [ -f "/data/apps_mqtt.tar" ] && [ -f "/data/apps_eventalerts.tar" ] && [ -f "/data/apps_datastream.tar" ]
+if [ -f "/data/apps_nodered.tar" ] && [ -f "/data/apps_mqtt.tar" ] && [ -f "/data/apps_eventalerts.tar" ] && [ -f "/data/apps_datastream.tar" ] && [ -f "/data/apps_adc.tar" ]
+then
+	# docker images are saved - load
+	dockerload.sh
+fi
+run_docker
+
+set +x
+while true; do
+	sleep 5m
+	keep_alive
+done
